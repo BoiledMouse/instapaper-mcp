@@ -8,7 +8,7 @@ A small [MCP](https://modelcontextprotocol.io) server that saves articles to Ins
 | Tool | Arguments | What it does |
 | --- | --- | --- |
 | `save_article` | `url` (required), `title?`, `note?` | Saves one URL. `note` is sent as Instapaper's `selection` field, which shows up as the bookmark's description. |
-| `save_articles` | `urls[]` (1–50) | Saves each URL in turn, pausing between requests (750 ms by default). Duplicates are dropped. Reports each URL's result, and stops early if Instapaper rejects the credentials. |
+| `save_articles` | `articles[]` (1–50), each `{ url, title?, note? }` | Saves each article in turn with its own title and note, pausing between requests (750 ms by default). Repeated URLs are saved once (the first occurrence wins). Reports each URL's result, and stops early if Instapaper rejects the credentials. |
 
 How Instapaper's responses are reported: `201` counts as saved. `400` (bad URL) and `403` (wrong username or password)
 come back as tool errors with a plain-English message. `500` and network failures are reported the same way.

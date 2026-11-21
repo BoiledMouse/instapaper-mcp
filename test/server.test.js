@@ -68,12 +68,14 @@ test("save_article rejects non-http URLs before calling Instapaper", async () =>
   assert.equal(f.calls.length, 0);
 });
 
+const articles = (...urls) => urls.map((url) => ({ url }));
+
 test("save_articles saves sequentially with a delay and reports per-URL results", async () => {
   const f = fakeFetch((u) => (u.endsWith("/bad") ? 400 : 201));
   const mcp = await connect(f.impl, 50);
   const res = await mcp.callTool({
     name: "save_articles",
-    arguments: { urls: ["https://a.com/1", "https://a.com/bad", "https://a.com/3", "https://a.com/1"] },
+    arguments: { articles: articles("https://a.com/1", "https://a.com/bad", "https://a.com/3", "https://a.com/1") },
   });
   const text = res.content[0].text;
   assert.equal(res.isError, false);
@@ -89,12 +91,48 @@ test("save_articles stops on bad credentials", async () => {
   const mcp = await connect(f.impl);
   const res = await mcp.callTool({
     name: "save_articles",
-    arguments: { urls: ["https://a.com/1", "https://a.com/2", "https://a.com/3"] },
+    arguments: { articles: articles("https://a.com/1", "https://a.com/2", "https://a.com/3") },
   });
   assert.equal(res.isError, true);
   assert.equal(f.calls.length, 1);
   assert.match(res.content[0].text, /2 skipped/);
   assert.match(res.content[0].text, /Stopped early/);
+});
+
+test("save_articles sends each article's own title and note, first duplicate wins", async () => {
+  const f = fakeFetch();
+  const mcp = await connect(f.impl);
+  const res = await mcp.callTool({
+    name: "save_articles",
+    arguments: {
+      articles: [
+        { url: "https://a.com/1", title: "One", note: "First note" },
+        { url: "https://a.com/2" },
+        { url: "https://a.com/3", note: "Only a note" },
+        { url: "https://a.com/1", title: "Ignored duplicate" },
+      ],
+    },
+  });
+  assert.equal(res.isError, false);
+  assert.deepEqual(
+    f.calls.map((c) => c.params),
+    [
+      { url: "https://a.com/1", title: "One", selection: "First note" },
+      { url: "https://a.com/2" },
+      { url: "https://a.com/3", selection: "Only a note" },
+    ],
+  );
+});
+
+test("save_articles rejects a non-http URL anywhere in the batch before saving anything", async () => {
+  const f = fakeFetch();
+  const mcp = await connect(f.impl);
+  const res = await mcp.callTool({
+    name: "save_articles",
+    arguments: { articles: [{ url: "https://a.com/1" }, { url: "ftp://a.com/2" }] },
+  });
+  assert.equal(res.isError, true);
+  assert.equal(f.calls.length, 0);
 });
 
 test("network failures are reported, not thrown", async () => {
