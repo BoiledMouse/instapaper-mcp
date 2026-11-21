@@ -17,6 +17,15 @@ const httpUrl = z
   .url()
   .refine((u) => /^https?:\/\//i.test(u), { message: "Must be an http(s) URL" });
 
+const title = z.string().max(500).optional().describe("Optional title; Instapaper fetches one if omitted");
+const note = z.string().max(2000).optional().describe("Optional note/description to attach to the bookmark");
+
+const article = z.object({
+  url: httpUrl.describe("The http(s) URL of the page to save"),
+  title,
+  note,
+});
+
 function describe(r: SaveResult): string {
   if (r.ok) {
     const title = r.savedTitle ? ` — "${r.savedTitle}"` : "";
@@ -37,8 +46,8 @@ export function createServer({ client, batchDelayMs }: ServerOptions): McpServer
         "(stored as the bookmark's description).",
       inputSchema: {
         url: httpUrl.describe("The http(s) URL of the page to save"),
-        title: z.string().max(500).optional().describe("Optional title; Instapaper fetches one if omitted"),
-        note: z.string().max(2000).optional().describe("Optional note/description to attach to the bookmark"),
+        title,
+        note,
       },
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
     },
@@ -56,21 +65,24 @@ export function createServer({ client, batchDelayMs }: ServerOptions): McpServer
     {
       title: "Save several articles to Instapaper",
       description:
-        `Save up to ${MAX_BATCH} URLs to Instapaper, one at a time with a short pause between each. ` +
-        "Reports per-URL success or failure. Stops early if the credentials are rejected.",
+        `Save up to ${MAX_BATCH} articles to Instapaper, one at a time with a short pause between each. ` +
+        "Each article has a URL and an optional title and note. Repeated URLs are saved once (the first " +
+        "occurrence wins). Reports per-URL success or failure. Stops early if the credentials are rejected.",
       inputSchema: {
-        urls: z.array(httpUrl).min(1).max(MAX_BATCH).describe("The http(s) URLs to save"),
+        articles: z.array(article).min(1).max(MAX_BATCH).describe("The articles to save"),
       },
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
     },
-    async ({ urls }) => {
-      const unique = [...new Set(urls)];
+    async ({ articles }) => {
+      const seen = new Set<string>();
+      const unique = articles.filter((a) => (seen.has(a.url) ? false : (seen.add(a.url), true)));
       const results: SaveResult[] = [];
       let aborted = false;
 
       for (let i = 0; i < unique.length; i++) {
         if (i > 0 && batchDelayMs > 0) await sleep(batchDelayMs);
-        const r = await client.save({ url: unique[i] });
+        const { url, title, note } = unique[i];
+        const r = await client.save({ url, title, note });
         results.push(r);
         if (!r.ok && r.kind === "bad_credentials") {
           aborted = true;
@@ -86,7 +98,7 @@ export function createServer({ client, batchDelayMs }: ServerOptions): McpServer
         `Saved ${saved} of ${unique.length} URL(s)` +
           (failed ? `, ${failed} failed` : "") +
           (skipped ? `, ${skipped} skipped` : "") +
-          (urls.length !== unique.length ? ` (${urls.length - unique.length} duplicate(s) ignored)` : "") +
+          (articles.length !== unique.length ? ` (${articles.length - unique.length} duplicate(s) ignored)` : "") +
           ".",
         ...results.map(describe),
       ];
